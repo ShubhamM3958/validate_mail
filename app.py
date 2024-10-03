@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import re
 import smtplib
-import dns.resolver
+from dns.resolver import Resolver, NoAnswer, NXDOMAIN
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
@@ -15,10 +15,11 @@ def is_valid_email_syntax(email):
 
 
 def get_mx_record(domain):
+    resolver = Resolver()
     try:
-        mx_records = dns.resolver.resolve(domain, 'MX')
-        return mx_records[0].exchange.to_text()  # Return first MX record
-    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
+        mx_records = resolver.resolve(domain, 'MX')
+        return str(mx_records[0].exchange).rstrip('.')
+    except (NoAnswer, NXDOMAIN):
         return None
 
 
@@ -83,15 +84,7 @@ def index():
     return render_template('index.html', result=result)
 
 
-# Route for validating email via API (JSON response)
-# @app.route('/api/validate', methods=['GET'])
-# def api_validate_email():
-#     email = request.args.get('email')
-#     if not email:
-#         return jsonify({'error': 'No email provided'}), 400
-#
-#     is_valid, message = validate_email(email)
-#     return jsonify({'email': email, 'is_valid': is_valid, 'message': message})
+
 @app.route('/api/validate', methods=['GET'])
 def api_validate_email():
     email = request.args.get('email')
