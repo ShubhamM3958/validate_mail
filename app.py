@@ -2,15 +2,16 @@ from flask import Flask, render_template, request, jsonify
 import re
 import smtplib
 import dns.resolver
+import threading
 
 app = Flask(__name__)
 
-# Validate email syntax using regex
+
 def is_valid_email_syntax(email):
     regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
     return re.match(regex, email) is not None
 
-# Get MX record for the domain
+
 def get_mx_record(domain):
     try:
         mx_records = dns.resolver.resolve(domain, 'MX')
@@ -18,19 +19,16 @@ def get_mx_record(domain):
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
         return None
 
-# Perform SMTP validation to check if email exists
+
 def validate_email_smtp(email):
     global server
     domain = email.split('@')[1]
-
-    # Get MX record for the domain
     mx_record = get_mx_record(domain)
     if not mx_record:
         return False, "No MX record found for domain"
 
-    # Set up SMTP connection
     try:
-        server = smtplib.SMTP(timeout=10)
+        server = smtplib.SMTP(timeout=30)
         server.set_debuglevel(0)
 
         # SMTP handshake
@@ -56,6 +54,7 @@ def validate_email_smtp(email):
         if 'server' in locals():
             server.quit()
 
+
 # Main email validation function
 def validate_email(email):
     if not is_valid_email_syntax(email):
@@ -63,7 +62,7 @@ def validate_email(email):
 
     return validate_email_smtp(email)
 
-# Route for form input and URL query handling
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     email = None
@@ -72,7 +71,6 @@ def index():
     # Check if the form is submitted
     if request.method == 'POST':
         email = request.form.get('email')
-    # Check if email is provided via URL
     elif request.args.get('email'):
         email = request.args.get('email')
 
@@ -82,15 +80,33 @@ def index():
 
     return render_template('index.html', result=result)
 
+
 # Route for validating email via API (JSON response)
+# @app.route('/api/validate', methods=['GET'])
+# def api_validate_email():
+#     email = request.args.get('email')
+#     if not email:
+#         return jsonify({'error': 'No email provided'}), 400
+#
+#     is_valid, message = validate_email(email)
+#     return jsonify({'email': email, 'is_valid': is_valid, 'message': message})
 @app.route('/api/validate', methods=['GET'])
 def api_validate_email():
     email = request.args.get('email')
     if not email:
         return jsonify({'error': 'No email provided'}), 400
 
-    is_valid, message = validate_email(email)
-    return jsonify({'email': email, 'is_valid': is_valid, 'message': message})
+    # Run validation in a background thread
+    result = {}
+    thread = threading.Thread(target=lambda: result.update(validate_email(email)))
+    thread.start()
+    thread.join(timeout=10)  # Wait for 10 seconds
+
+    if not result:  # If no result is returned
+        return jsonify({'email': email, 'is_valid': False, 'message': "Validation timed out"}), 504
+
+    return jsonify(result)
+
 
 if __name__ == '__main__':
     app.run(debug=False)
