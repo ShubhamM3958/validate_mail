@@ -2,9 +2,11 @@ from flask import Flask, render_template, request, jsonify
 import re
 import smtplib
 import dns.resolver
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
+
+executor = ThreadPoolExecutor(max_workers=2)
 
 
 def is_valid_email_syntax(email):
@@ -96,14 +98,13 @@ def api_validate_email():
     if not email:
         return jsonify({'error': 'No email provided'}), 400
 
-    # Run validation in a background thread
-    result = {}
-    thread = threading.Thread(target=lambda: result.update(validate_email(email)))
-    thread.start()
-    thread.join(timeout=10)  # Wait for 10 seconds
+    future = executor.submit(validate_email, email)
 
-    if not result:  # If no result is returned
-        return jsonify({'email': email, 'is_valid': False, 'message': "Validation timed out"}), 504
+    try:
+        # Wait for the result with a timeout
+        result = future.result(timeout=10)  # Adjust the timeout as needed
+    except Exception as e:
+        return jsonify({'email': email, 'is_valid': False, 'message': str(e)}), 504
 
     return jsonify(result)
 
